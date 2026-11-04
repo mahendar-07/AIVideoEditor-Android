@@ -1,6 +1,7 @@
 package com.example.aivideoeditor
 
 import android.net.Uri
+import android.media.MediaMetadataRetriever
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -32,6 +33,8 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.util.Locale
 
 private val Bg = Color(0xFF08090D)
@@ -64,7 +67,7 @@ private fun EditorScreen() {
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
-            runCatching { context.contentResolver.takePersistableUriPermission(uri, 1) }
+            runCatching { context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
             source = uri
             duration = 0L
             position = 0L
@@ -79,10 +82,36 @@ private fun EditorScreen() {
     LaunchedEffect(source) {
         player.stop()
         player.clearMediaItems()
-        source?.let {
-            player.setMediaItem(MediaItem.fromUri(it))
+        duration = 0L
+        position = 0L
+        source?.let { uri ->
+            player.setMediaItem(MediaItem.fromUri(uri))
             player.prepare()
             player.playWhenReady = false
+
+            // Read duration independently of ExoPlayer. Some phone videos expose
+            // their first frame before the player reports a usable duration.
+            val metadataDuration = withContext(Dispatchers.IO) {
+                runCatching {
+                    val retriever = MediaMetadataRetriever()
+                    try {
+                        retriever.setDataSource(context, uri)
+                        retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                    } finally {
+                        retriever.release()
+                    }
+                }.getOrDefault(0L)
+            }
+            if (metadataDuration > 0L) {
+                duration = metadataDuration
+                if (segments.isEmpty()) {
+                    segments = listOf(Segment(1, 0L, metadataDuration))
+                    selectedId = 1
+                    status = "Video loaded · " + timeLabel(metadataDuration)
+                }
+            } else {
+                status = "Video imported · reading duration from player…"
+            }
         }
     }
     DisposableEffect(player) { onDispose { player.release() } }
