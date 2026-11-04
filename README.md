@@ -1,24 +1,30 @@
 # AI Video Editor for Android
 
-A standalone native Android video editor project, separate from iCut.
+A standalone native Android video editor, separate from iCut. Product direction: full manual editing plus AI-assisted editing and AI creation, using offline-first recognition with optional online AI services.
 
-## Current build: CapCut-inspired editor workspace
-- Dark, mobile-first editing screen with top actions and export entry point
-- Video import from device storage
-- Media3 video preview and play/pause controls
-- Timeline-style workspace with video, audio, and text track placeholders
-- Bottom editing categories: Edit, Audio, Text, Captions, Overlay, Effects, Filters, Import
-- Contextual tool strip for each category
+## Current foundation
+- Kotlin + Jetpack Compose Android application
+- CapCut-inspired dark mobile editor interface
+- Import video from device storage
+- Media3 preview playback and play/pause
+- Timeline segment selection
+- Split a selected segment at the playhead
+- Set selected segment start/end at the playhead (trim boundaries)
+- Delete a selected segment
+- Playback position scrubbing
+
+## Important editing-engine note
+Split, trim-boundary and delete operations currently update the in-memory edit timeline and selected segment state. They do not yet create a rendered output file or stitch multiple segments into a final video. Project persistence, multi-source clip assembly, audio/text tracks and export are subsequent milestones.
+
+## Roadmap
+1. Stabilize timeline and clip editing; add multi-clip project model and undo/redo.
+2. Add audio tracks, text overlays, captions and synchronization.
+3. Add render/export pipeline and project save/restore.
+4. Add offline speech recognition (Whisper evaluation), word-timed captions and AI-assisted editing.
+5. Add optional online AI video generation and advanced effects.
 
 ## Build locally
-1. Open this repository in Android Studio.
-2. Install JDK 17 and Android SDK 36.
-3. Sync Gradle and run the `app` configuration.
+Open this repository in Android Studio, install JDK 17 and Android SDK 36, sync Gradle, and run the app configuration.
 
-## Download an APK
-Open the repository's **Actions** tab, select the latest successful **Android APK** workflow run, and download the `AIVideoEditor-debug-apk` artifact.
-
-To publish a permanent APK under **Releases**, create and push a version tag such as `v0.1.0`. The workflow will build the APK and attach it to the release.
-
-## Not implemented yet
-The current version is the first UI and preview foundation. Timeline editing operations (real split/trim/move), audio mixing, text rendering, auto captions, effects, transitions, AI video generation, and final export are not functional yet. These will be built in stages after the editor shell is stable.
+## APK
+Open GitHub Actions, select the latest successful Android APK workflow run, and download the AIVideoEditor-debug-apk artifact.
