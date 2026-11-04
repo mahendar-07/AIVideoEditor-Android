@@ -7,8 +7,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -27,48 +27,59 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
+import androidx.media3.common.C
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import kotlinx.coroutines.delay
+import java.util.Locale
 
-private val AppBg = Color(0xFF08090D)
-private val SurfaceDark = Color(0xFF17191F)
-private val SurfaceRaised = Color(0xFF22252D)
+private val Bg = Color(0xFF08090D)
+private val Panel = Color(0xFF17191F)
 private val Accent = Color(0xFF42D6C5)
 private val Muted = Color(0xFF9297A3)
+
+private data class Segment(val id: Int, val start: Long, val end: Long)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { CapCutStyleEditor() }
+        setContent { EditorScreen() }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun CapCutStyleEditor() {
+private fun EditorScreen() {
     val context = androidx.compose.ui.platform.LocalContext.current
-    var videoUri by remember { mutableStateOf<Uri?>(null) }
-    var isPlaying by remember { mutableStateOf(false) }
-    var selectedTool by remember { mutableStateOf("Edit") }
-    var showInfo by remember { mutableStateOf(false) }
+    var source by remember { mutableStateOf<Uri?>(null) }
+    var duration by remember { mutableLongStateOf(0L) }
+    var position by remember { mutableLongStateOf(0L) }
+    var playing by remember { mutableStateOf(false) }
+    var tool by remember { mutableStateOf("Edit") }
+    var segments by remember { mutableStateOf(listOf<Segment>()) }
+    var selectedId by remember { mutableIntStateOf(1) }
+    var nextId by remember { mutableIntStateOf(2) }
+    var status by remember { mutableStateOf("Import a video to begin") }
+    var dialog by remember { mutableStateOf("") }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
-            runCatching {
-                context.contentResolver.takePersistableUriPermission(
-                    uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
-            }
-            videoUri = uri
-            isPlaying = false
+            runCatching { context.contentResolver.takePersistableUriPermission(uri, 1) }
+            source = uri
+            duration = 0L
+            position = 0L
+            segments = emptyList()
+            selectedId = 1
+            nextId = 2
+            status = "Loading video…"
         }
     }
     val player = remember { ExoPlayer.Builder(context).build() }
-    LaunchedEffect(videoUri) {
+
+    LaunchedEffect(source) {
         player.stop()
         player.clearMediaItems()
-        videoUri?.let {
+        source?.let {
             player.setMediaItem(MediaItem.fromUri(it))
             player.prepare()
             player.playWhenReady = false
@@ -76,242 +87,239 @@ private fun CapCutStyleEditor() {
     }
     DisposableEffect(player) { onDispose { player.release() } }
 
-    MaterialTheme(colorScheme = darkColorScheme(
-        primary = Accent, secondary = Accent, background = AppBg, surface = SurfaceDark
-    )) {
+    LaunchedEffect(player) {
+        while (true) {
+            val length = player.duration
+            if (length > 0 && length != C.TIME_UNSET && length != duration) {
+                duration = length
+                if (segments.isEmpty()) {
+                    segments = listOf(Segment(1, 0L, length))
+                    status = "Video loaded · " + timeLabel(length)
+                }
+            }
+            position = player.currentPosition.coerceAtLeast(0L)
+            playing = player.isPlaying
+            delay(150)
+        }
+    }
+
+    val selected = segments.firstOrNull { it.id == selectedId }
+
+    fun splitClip() {
+        val clip = segments.firstOrNull { it.id == selectedId }
+        val cut = player.currentPosition
+        if (clip == null) status = "Import a video first"
+        else if (cut <= clip.start + 100L || cut >= clip.end - 100L) {
+            status = "Move playhead inside the selected clip to split"
+        } else {
+            val left = clip.copy(end = cut)
+            val right = Segment(nextId, cut, clip.end)
+            segments = segments.flatMap { if (it.id == clip.id) listOf(left, right) else listOf(it) }
+            selectedId = nextId
+            nextId++
+            status = "Split at " + timeLabel(cut)
+        }
+    }
+
+    fun trimStart() {
+        val clip = segments.firstOrNull { it.id == selectedId }
+        val at = player.currentPosition
+        if (clip != null && at > clip.start && at < clip.end - 100L) {
+            segments = segments.map { if (it.id == clip.id) it.copy(start = at) else it }
+            status = "Start trimmed to " + timeLabel(at)
+        } else status = "Place playhead inside the selected clip"
+    }
+
+    fun trimEnd() {
+        val clip = segments.firstOrNull { it.id == selectedId }
+        val at = player.currentPosition
+        if (clip != null && at > clip.start + 100L && at < clip.end) {
+            segments = segments.map { if (it.id == clip.id) it.copy(end = at) else it }
+            status = "End trimmed to " + timeLabel(at)
+        } else status = "Place playhead inside the selected clip"
+    }
+
+    fun deleteClip() {
+        if (segments.isEmpty()) return
+        if (segments.size == 1) {
+            segments = emptyList()
+            source = null
+            duration = 0L
+            player.stop()
+        } else {
+            val rest = segments.filterNot { it.id == selectedId }
+            segments = rest
+            selectedId = rest.first().id
+            player.seekTo(rest.first().start)
+        }
+        status = "Selected clip segment deleted"
+    }
+
+    MaterialTheme(colorScheme = darkColorScheme(primary = Accent, background = Bg, surface = Panel)) {
         Scaffold(
-            containerColor = AppBg,
+            containerColor = Bg,
             topBar = {
-                Row(
-                    Modifier.fillMaxWidth().height(54.dp).padding(horizontal = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    IconButton(onClick = { showInfo = true }) {
+                Row(Modifier.fillMaxWidth().height(54.dp).padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                    IconButton(onClick = { dialog = "Project settings are planned for a later update." }) {
                         Icon(Icons.Default.ArrowBack, "Back", tint = Color.White)
                     }
-                    Text("New project", color = Color.White, fontWeight = FontWeight.SemiBold)
-                    Button(
-                        onClick = { showInfo = true },
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("New project", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Text("AI VIDEO EDITOR", color = Muted, fontSize = 9.sp)
+                    }
+                    Button(onClick = { dialog = "Export is the next rendering milestone. Your current timeline edits are not yet rendered to a new video." },
                         colors = ButtonDefaults.buttonColors(containerColor = Accent),
-                        contentPadding = PaddingValues(horizontal = 17.dp, vertical = 7.dp),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 7.dp)) {
                         Text("Export", color = Color(0xFF07110F), fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.width(4.dp))
-                        Icon(Icons.Default.FileUpload, null, tint = Color(0xFF07110F), modifier = Modifier.size(17.dp))
                     }
                 }
             },
-            bottomBar = { EditorToolBar(selectedTool) { selectedTool = it } }
-        ) { insets ->
-            Column(
-                Modifier.fillMaxSize().padding(insets),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                // Preview canvas
-                Box(
-                    Modifier.fillMaxWidth().weight(1f).padding(horizontal = 18.dp, vertical = 8.dp)
-                        .clip(RoundedCornerShape(8.dp)).background(Color.Black),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (videoUri != null) {
-                        AndroidView(
-                            factory = { viewContext ->
-                                PlayerView(viewContext).apply {
-                                    this.player = player
-                                    useController = false
-                                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                                    setShutterBackgroundColor(android.graphics.Color.BLACK)
-                                }
-                            },
-                            update = { it.player = player },
-                            modifier = Modifier.fillMaxSize()
-                        )
+            bottomBar = { ToolBar(tool) { tool = it } }
+        ) { padding ->
+            Column(Modifier.fillMaxSize().padding(padding), horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 16.dp, vertical = 8.dp)
+                    .clip(RoundedCornerShape(8.dp)).background(Color.Black), contentAlignment = Alignment.Center) {
+                    if (source != null) {
+                        AndroidView(factory = { PlayerView(it).apply {
+                            this.player = player
+                            useController = false
+                            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        } }, update = { it.player = player }, modifier = Modifier.fillMaxSize())
                     } else {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Default.Movie, null, tint = Color(0xFF555B66), modifier = Modifier.size(48.dp))
-                            Spacer(Modifier.height(12.dp))
-                            Text("Your video preview", color = Color(0xFFB9BDC6), fontSize = 15.sp)
-                            Spacer(Modifier.height(5.dp))
-                            Text("Add a clip to start editing", color = Muted, fontSize = 12.sp)
-                            Spacer(Modifier.height(16.dp))
-                            FilledTonalButton(
-                                onClick = { picker.launch(arrayOf("video/*")) },
-                                colors = ButtonDefaults.filledTonalButtonColors(containerColor = Accent)
-                            ) {
-                                Icon(Icons.Default.Add, null, tint = Color(0xFF07110F))
-                                Spacer(Modifier.width(6.dp))
-                                Text("Add video", color = Color(0xFF07110F), fontWeight = FontWeight.Bold)
+                            Icon(Icons.Default.Movie, null, tint = Color.DarkGray, modifier = Modifier.size(48.dp))
+                            Spacer(Modifier.height(10.dp))
+                            Text("Your video preview", color = Color.LightGray)
+                            Text("Import footage to start editing", color = Muted, fontSize = 12.sp)
+                            Spacer(Modifier.height(14.dp))
+                            Button(onClick = { picker.launch(arrayOf("video/*")) },
+                                colors = ButtonDefaults.buttonColors(containerColor = Accent)) {
+                                Icon(Icons.Default.Add, null, tint = Color.Black)
+                                Text(" Import video", color = Color.Black)
                             }
-                        }
-                    }
-                    if (videoUri != null) {
-                        Surface(
-                            Modifier.align(Alignment.BottomEnd).padding(10.dp),
-                            color = Color(0x99000000), shape = RoundedCornerShape(6.dp)
-                        ) {
-                            Text("PREVIEW", Modifier.padding(horizontal = 8.dp, vertical = 4.dp), color = Color.White, fontSize = 9.sp)
                         }
                     }
                 }
 
-                // Playback row
-                Row(
-                    Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 18.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("00:00", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                        Text("  /  00:00", color = Muted, fontSize = 12.sp)
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(44.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                    Column {
+                        Text(timeLabel(position), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("/ " + timeLabel(duration), color = Muted, fontSize = 9.sp)
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = { player.seekTo(0); isPlaying = false; player.pause() }) {
-                            Icon(Icons.Default.SkipPrevious, "Beginning", tint = Color.White)
+                        IconButton(onClick = { player.seekTo(0); player.pause() }) {
+                            Icon(Icons.Default.SkipPrevious, "Restart", tint = Color.White)
                         }
-                        FilledIconButton(
-                            onClick = {
-                                if (player.isPlaying) { player.pause(); isPlaying = false }
-                                else if (videoUri != null) { player.play(); isPlaying = true }
-                                else picker.launch(arrayOf("video/*"))
-                            },
-                            colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.White),
-                            modifier = Modifier.size(38.dp)
-                        ) {
-                            Icon(if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, "Play", tint = Color.Black)
+                        FilledIconButton(onClick = {
+                            if (player.isPlaying) player.pause()
+                            else if (source != null) {
+                                val clip = segments.firstOrNull { it.id == selectedId }
+                                if (clip != null && player.currentPosition >= clip.end) player.seekTo(clip.start)
+                                player.play()
+                            } else picker.launch(arrayOf("video/*"))
+                        }, modifier = Modifier.size(38.dp),
+                            colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.White)) {
+                            Icon(if (playing) Icons.Default.Pause else Icons.Default.PlayArrow, "Play", tint = Color.Black)
                         }
-                        IconButton(onClick = { showInfo = true }) {
+                        IconButton(onClick = { dialog = "Undo history will be added after the edit command model is in place." }) {
                             Icon(Icons.Default.Undo, "Undo", tint = Color.White)
                         }
-                        IconButton(onClick = { showInfo = true }) {
-                            Icon(Icons.Default.Redo, "Redo", tint = Muted)
-                        }
                     }
-                    IconButton(onClick = { showInfo = true }) {
-                        Icon(Icons.Default.AspectRatio, "Canvas ratio", tint = Color.White)
-                    }
+                    Text("Original", color = Muted, fontSize = 10.sp)
                 }
 
-                // Timeline workspace
-                Column(
-                    Modifier.fillMaxWidth().height(174.dp).background(Color(0xFF101217)).padding(top = 8.dp)
-                ) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
+                if (duration > 0L) {
+                    Slider(value = position.coerceIn(0L, duration).toFloat(),
+                        onValueChange = { player.seekTo(it.toLong()) },
+                        valueRange = 0f..duration.toFloat(),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp).height(24.dp),
+                        colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent))
+                }
+
+                Column(Modifier.fillMaxWidth().height(194.dp).background(Color(0xFF101217)).padding(top = 8.dp)) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text("Timeline", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("00:00", color = Muted, fontSize = 10.sp)
-                            Spacer(Modifier.width(10.dp))
-                            Icon(Icons.Default.ZoomOut, null, tint = Muted, modifier = Modifier.size(17.dp))
-                            Icon(Icons.Default.ZoomIn, null, tint = Muted, modifier = Modifier.size(17.dp))
-                        }
+                        Text("${segments.size} segment(s)", color = Muted, fontSize = 10.sp)
                     }
-                    Row(
-                        Modifier.fillMaxWidth().padding(start = 14.dp, top = 12.dp, end = 14.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        listOf("00:00", "00:05", "00:10", "00:15", "00:20").forEach {
-                            Text(it, color = Muted, fontSize = 9.sp)
-                        }
-                    }
-                    Row(
-                        Modifier.fillMaxWidth().weight(1f).padding(start = 14.dp, top = 8.dp, end = 14.dp, bottom = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Video", color = Muted, fontSize = 10.sp, modifier = Modifier.width(42.dp))
-                        if (videoUri == null) {
-                            Box(
-                                Modifier.weight(1f).height(48.dp).border(1.dp, Color(0xFF363A44), RoundedCornerShape(6.dp))
-                                    .clip(RoundedCornerShape(6.dp)).background(SurfaceDark),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text("＋  Add a video clip", color = Muted, fontSize = 11.sp)
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        if (segments.isEmpty()) {
+                            Box(Modifier.width(250.dp).height(55.dp).clip(RoundedCornerShape(6.dp))
+                                .background(Panel).border(1.dp, Color.DarkGray, RoundedCornerShape(6.dp))
+                                .clickable { picker.launch(arrayOf("video/*")) }, contentAlignment = Alignment.Center) {
+                                Text("+ Import a video clip", color = Muted, fontSize = 11.sp)
                             }
-                        } else {
-                            Row(
-                                Modifier.weight(1f).height(48.dp).clip(RoundedCornerShape(6.dp))
-                                    .background(Color(0xFF254A49)).border(1.dp, Accent, RoundedCornerShape(6.dp)),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                repeat(8) { index ->
-                                    Box(Modifier.weight(1f).fillMaxHeight().padding(2.dp).background(
-                                        if (index % 2 == 0) Color(0xFF477B76) else Color(0xFF35645F),
-                                        RoundedCornerShape(3.dp)
-                                    ))
-                                }
+                        } else segments.forEachIndexed { index, clip ->
+                            val active = clip.id == selectedId
+                            Column(Modifier.width(116.dp).height(55.dp).clip(RoundedCornerShape(6.dp))
+                                .background(if (active) Color(0xFF254A49) else Panel)
+                                .border(if (active) 2.dp else 1.dp, if (active) Accent else Color.DarkGray, RoundedCornerShape(6.dp))
+                                .clickable { selectedId = clip.id; player.pause(); player.seekTo(clip.start) }
+                                .padding(7.dp), verticalArrangement = Arrangement.SpaceBetween) {
+                                Text("CLIP ${index + 1}", color = if (active) Accent else Color.LightGray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                Text("${timeLabel(clip.start)} – ${timeLabel(clip.end)}", color = Color.White, fontSize = 9.sp)
+                                Text(timeLabel(clip.end - clip.start), color = Muted, fontSize = 8.sp)
                             }
                         }
                     }
-                    Row(
-                        Modifier.fillMaxWidth().padding(start = 56.dp, end = 14.dp, bottom = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("＋", color = Accent, fontSize = 18.sp)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Add audio", color = Muted, fontSize = 10.sp)
-                        Spacer(Modifier.width(22.dp))
-                        Text("＋", color = Accent, fontSize = 18.sp)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Add text", color = Muted, fontSize = 10.sp)
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Audio track", color = Muted, fontSize = 10.sp)
+                        Text("+ Add audio", color = Accent, fontSize = 10.sp, modifier = Modifier.clickable { dialog = "Audio import and mixing are coming in the audio editing phase." })
                     }
-                }
-
-                // Contextual tool options
-                ToolOptions(selectedTool) {
-                    when (it) {
-                        "Import" -> picker.launch(arrayOf("video/*"))
-                        else -> showInfo = true
-                    }
-                }
-            }
-        }
-        if (showInfo) {
-            AlertDialog(
-                onDismissRequest = { showInfo = false },
-                title = { Text("Coming in the next build") },
-                text = { Text("The CapCut-style editor layout is in place. Editing actions, export, effects and AI tools are being added in the next development steps.") },
-                confirmButton = { TextButton(onClick = { showInfo = false }) { Text("Got it") } },
-                containerColor = SurfaceRaised,
-                titleContentColor = Color.White,
-                textContentColor = Color.LightGray
-            )
-        }
-    }
-}
-
-@Composable
-private fun EditorToolBar(selected: String, onSelect: (String) -> Unit) {
-    val tools = listOf(
-        "Edit" to Icons.Default.ContentCut,
-        "Audio" to Icons.Default.MusicNote,
-        "Text" to Icons.Default.TextFields,
-        "Captions" to Icons.Default.Subtitles,
-        "Overlay" to Icons.Default.Layers,
-        "Effects" to Icons.Default.AutoAwesome,
-        "Filters" to Icons.Default.Tune,
-        "Import" to Icons.Default.Add
-    )
-    Surface(color = Color(0xFF15171D), shadowElevation = 10.dp) {
-        Row(
-            Modifier.fillMaxWidth().navigationBarsPadding().horizontalScroll(rememberScrollState())
-                .padding(horizontal = 7.dp, vertical = 9.dp),
-            horizontalArrangement = Arrangement.spacedBy(3.dp)
-        ) {
-            tools.forEach { (label, icon) ->
-                val active = selected == label
-                Column(
-                    Modifier.width(66.dp).clip(RoundedCornerShape(9.dp))
-                        .background(if (active) Color(0xFF293B3A) else Color.Transparent)
-                        .padding(vertical = 7.dp).clickable { onSelect(label) },
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Icon(icon, null, tint = if (active) Accent else Color(0xFFD1D4DA), modifier = Modifier.size(21.dp))
                     Spacer(Modifier.height(5.dp))
-                    Text(label, color = if (active) Accent else Color(0xFFD1D4DA), fontSize = 10.sp)
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Text track", color = Muted, fontSize = 10.sp)
+                        Text("+ Add text", color = Accent, fontSize = 10.sp, modifier = Modifier.clickable { dialog = "Text overlays and title animation are coming in the text editing phase." })
+                    }
+                    Spacer(Modifier.height(7.dp))
+                    Text(status, color = Muted, fontSize = 9.sp, modifier = Modifier.padding(horizontal = 14.dp))
+                }
+
+                ToolActions(tool) { action ->
+                    when (action) {
+                        "Import" -> picker.launch(arrayOf("video/*"))
+                        "Split" -> splitClip()
+                        "Trim start" -> trimStart()
+                        "Trim end" -> trimEnd()
+                        "Delete" -> deleteClip()
+                        "Go to clip start" -> selected?.let { player.seekTo(it.start) }
+                        else -> dialog = "$action is planned for the next feature phase."
+                    }
+                }
+            }
+        }
+        if (dialog.isNotEmpty()) {
+            AlertDialog(onDismissRequest = { dialog = "" }, title = { Text("AI Video Editor") },
+                text = { Text(dialog) }, confirmButton = {
+                    TextButton(onClick = { dialog = "" }) { Text("OK") }
+                }, containerColor = Color(0xFF22252D), titleContentColor = Color.White, textContentColor = Color.LightGray)
+        }
+    }
+}
+
+@Composable
+private fun ToolBar(selected: String, onSelect: (String) -> Unit) {
+    val items = listOf("Edit" to Icons.Default.ContentCut, "Audio" to Icons.Default.MusicNote,
+        "Text" to Icons.Default.TextFields, "Captions" to Icons.Default.Subtitles,
+        "Overlay" to Icons.Default.Layers, "Effects" to Icons.Default.AutoAwesome,
+        "Filters" to Icons.Default.Tune, "Import" to Icons.Default.Add)
+    Surface(color = Color(0xFF15171D), shadowElevation = 10.dp) {
+        Row(Modifier.fillMaxWidth().navigationBarsPadding().horizontalScroll(rememberScrollState())
+            .padding(horizontal = 7.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+            items.forEach { (label, icon) ->
+                val active = label == selected
+                Column(Modifier.width(66.dp).clip(RoundedCornerShape(9.dp))
+                    .background(if (active) Color(0xFF293B3A) else Color.Transparent)
+                    .clickable { onSelect(label) }.padding(vertical = 7.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(icon, null, tint = if (active) Accent else Color.LightGray, modifier = Modifier.size(21.dp))
+                    Spacer(Modifier.height(5.dp))
+                    Text(label, color = if (active) Accent else Color.LightGray, fontSize = 10.sp)
                 }
             }
         }
@@ -319,34 +327,33 @@ private fun EditorToolBar(selected: String, onSelect: (String) -> Unit) {
 }
 
 @Composable
-private fun ToolOptions(tool: String, onAction: (String) -> Unit) {
-    val options = when (tool) {
-        "Edit" -> listOf("Split", "Trim", "Speed", "Volume", "Delete")
-        "Audio" -> listOf("Sounds", "Extract", "Record", "Fade")
+private fun ToolActions(tool: String, onAction: (String) -> Unit) {
+    val actions = when (tool) {
+        "Edit" -> listOf("Split", "Trim start", "Trim end", "Go to clip start", "Delete")
+        "Audio" -> listOf("Import audio", "Extract audio", "Record", "Fade")
         "Text" -> listOf("Add text", "Text template", "Stickers")
         "Captions" -> listOf("Auto captions", "Manual captions", "Caption style")
-        "Overlay" -> listOf("Add overlay", "PIP", "Mask")
-        "Effects" -> listOf("Video effects", "Body effects", "Transitions")
+        "Overlay" -> listOf("Add overlay", "Picture in picture", "Mask")
+        "Effects" -> listOf("Video effects", "Transitions", "Keyframes")
         "Filters" -> listOf("Adjust", "Filters", "Color")
-        else -> listOf("From device", "Recent videos")
+        else -> listOf("Import")
     }
-    Row(
-        Modifier.fillMaxWidth().height(74.dp).background(AppBg).horizontalScroll(rememberScrollState())
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(9.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        options.forEach { option ->
-            Column(
-                Modifier.width(66.dp).clip(RoundedCornerShape(8.dp)).background(SurfaceDark)
-                    .clickable { onAction(option) }.padding(vertical = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(option.take(1), color = Accent, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+    Row(Modifier.fillMaxWidth().height(74.dp).background(Bg).horizontalScroll(rememberScrollState())
+        .padding(horizontal = 10.dp, vertical = 7.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        actions.forEach { action ->
+            Column(Modifier.width(70.dp).clip(RoundedCornerShape(8.dp)).background(Panel)
+                .clickable { onAction(action) }.padding(vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(action.take(1), color = Accent, fontSize = 17.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(3.dp))
-                Text(option, color = Color.LightGray, fontSize = 9.sp, textAlign = TextAlign.Center, maxLines = 1)
+                Text(action, color = Color.LightGray, fontSize = 9.sp, textAlign = TextAlign.Center, maxLines = 1)
             }
         }
     }
 }
 
+private fun timeLabel(ms: Long): String {
+    val seconds = ms.coerceAtLeast(0L) / 1000L
+    return String.format(Locale.US, "%02d:%02d", seconds / 60L, seconds % 60L)
+}
