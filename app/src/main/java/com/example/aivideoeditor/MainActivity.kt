@@ -7,6 +7,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -305,7 +306,7 @@ private fun EditorToolBar(selected: String, onSelect: (String) -> Unit) {
                 Column(
                     Modifier.width(66.dp).clip(RoundedCornerShape(9.dp))
                         .background(if (active) Color(0xFF293B3A) else Color.Transparent)
-                        .padding(vertical = 7.dp).clickableNoRipple { onSelect(label) },
+                        .padding(vertical = 7.dp).clickable { onSelect(label) },
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Icon(icon, null, tint = if (active) Accent else Color(0xFFD1D4DA), modifier = Modifier.size(21.dp))
@@ -338,7 +339,7 @@ private fun ToolOptions(tool: String, onAction: (String) -> Unit) {
         options.forEach { option ->
             Column(
                 Modifier.width(66.dp).clip(RoundedCornerShape(8.dp)).background(SurfaceDark)
-                    .clickableNoRipple { onAction(option) }.padding(vertical = 8.dp),
+                    .clickable { onAction(option) }.padding(vertical = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(option.take(1), color = Accent, fontSize = 17.sp, fontWeight = FontWeight.Bold)
@@ -349,8 +350,3 @@ private fun ToolOptions(tool: String, onAction: (String) -> Unit) {
     }
 }
 
-private fun Modifier.clickableNoRipple(onClick: () -> Unit): Modifier =
-    this.then(Modifier.clickableCompat(onClick))
-
-private fun Modifier.clickableCompat(onClick: () -> Unit): Modifier =
-    androidx.compose.foundation.clickable(onClick = onClick)
