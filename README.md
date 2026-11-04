@@ -2,12 +2,13 @@
 
 A standalone native Android video editor project, separate from iCut.
 
-## Phase 1
-- Kotlin and Jetpack Compose application shell
-- Dark editor home screen
-- Android video picker
-- Media3 ExoPlayer video preview
-- GitHub Actions workflow builds a debug APK on every push to `main`
+## Current build: CapCut-inspired editor workspace
+- Dark, mobile-first editing screen with top actions and export entry point
+- Video import from device storage
+- Media3 video preview and play/pause controls
+- Timeline-style workspace with video, audio, and text track placeholders
+- Bottom editing categories: Edit, Audio, Text, Captions, Overlay, Effects, Filters, Import
+- Contextual tool strip for each category
 
 ## Build locally
 1. Open this repository in Android Studio.
@@ -19,5 +20,5 @@ Open the repository's **Actions** tab, select the latest successful **Android AP
 
 To publish a permanent APK under **Releases**, create and push a version tag such as `v0.1.0`. The workflow will build the APK and attach it to the release.
 
-## Current limitations
-This is an early Phase 1 foundation, not a CapCut replacement. Multi-track timeline editing, trim/split export, captions, audio mixing, effects, and AI editing are planned follow-up work.
+## Not implemented yet
+The current version is the first UI and preview foundation. Timeline editing operations (real split/trim/move), audio mixing, text rendering, auto captions, effects, transitions, AI video generation, and final export are not functional yet. These will be built in stages after the editor shell is stable.
