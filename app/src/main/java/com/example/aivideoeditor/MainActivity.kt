@@ -380,7 +380,7 @@ private fun ToolBar(selected: String, onSelect: (String) -> Unit) {
 @Composable
 private fun ToolActions(tool: String, onAction: (String) -> Unit) {
     val actions = when (tool) {
-        "Edit" -> listOf("Split", "Trim start", "Trim end", "Go to clip start", "Delete")
+        "Edit" -> listOf("Split", "Trim start", "Trim end", "Move left", "Move right", "Go to clip start", "Delete")
         "Audio" -> listOf("Import audio", "Extract audio", "Record", "Fade")
         "Text" -> listOf("Add text", "Text template", "Stickers")
         "Captions" -> listOf("Auto captions", "Manual captions", "Caption style")
