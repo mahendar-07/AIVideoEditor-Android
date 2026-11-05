@@ -60,6 +60,27 @@ class TimelineEngineTest {
         assertEquals(listOf("clip-2"), result.tracks.first().clips.map { it.id })
     }
 
+    @Test fun reorderMovesClipAndClosesTimelineGaps() {
+        val base = sampleProject()
+        val first = base.tracks.first().clips.single()
+        val second = first.copy(id = "clip-2", timelineStartMs = 10000L, title = "Second")
+        val third = first.copy(id = "clip-3", timelineStartMs = 20000L, title = "Third")
+        val project = base.copy(tracks = listOf(base.tracks.first().copy(clips = listOf(first, second, third))))
+
+        val result = TimelineEngine.reorder(project, "clip-3", 0)
+        val clips = result.tracks.first().clips.sortedBy { it.timelineStartMs }
+
+        assertEquals(listOf("clip-3", "clip-1", "clip-2"), clips.map { it.id })
+        assertEquals(listOf(0L, 10000L, 20000L), clips.map { it.timelineStartMs })
+        assertEquals(30000L, result.durationMs)
+    }
+
+    @Test fun invalidReorderLeavesProjectUnchanged() {
+        val project = sampleProject()
+        assertEquals(project, TimelineEngine.reorder(project, "missing", 0))
+        assertEquals(project, TimelineEngine.reorder(project, "clip-1", 1))
+    }
+
     @Test fun invalidSplitDoesNotChangeProject() {
         val project = sampleProject()
         assertEquals(project, TimelineEngine.split(project, "clip-1", 0L))
