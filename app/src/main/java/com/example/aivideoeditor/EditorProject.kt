@@ -120,6 +120,21 @@ object TimelineEngine {
         })
     }
 
+    /** Reorders primary-track clips and closes gaps to create a continuous sequence. */
+    fun reorder(project: EditorProject, clipId: String, targetIndex: Int): EditorProject {
+        val track = project.tracks.firstOrNull { it.clips.any { clip -> clip.id == clipId } } ?: return project
+        val ordered = track.clips.sortedBy { it.timelineStartMs }.toMutableList()
+        val fromIndex = ordered.indexOfFirst { it.id == clipId }
+        if (fromIndex < 0 || targetIndex !in ordered.indices) return project
+        val clip = ordered.removeAt(fromIndex)
+        ordered.add(targetIndex.coerceIn(0, ordered.size), clip)
+        var cursor = 0L
+        val positioned = ordered.map { item ->
+            item.copy(timelineStartMs = cursor).also { cursor += it.durationMs }
+        }
+        return project.replaceTrack(track.copy(clips = positioned))
+    }
+
     private fun EditorProject.replaceTrack(updated: EditorTrack): EditorProject =
         copy(tracks = tracks.map { if (it.id == updated.id) updated else it })
 }
