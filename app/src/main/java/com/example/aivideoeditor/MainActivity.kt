@@ -195,7 +195,7 @@ private fun EditorScreen() {
                     .clip(RoundedCornerShape(8.dp)).background(Color.Black), contentAlignment = Alignment.Center) {
                     if (source != null) {
                         AndroidView(factory = { PlayerView(it).apply {
-                            player = player
+                            this.player = player
                             useController = false
                             resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                         } }, update = { it.player = player }, modifier = Modifier.fillMaxSize())
@@ -246,13 +246,13 @@ private fun EditorScreen() {
                         if (source?.toString() != clip.sourceUri) source = Uri.parse(clip.sourceUri)
                         player.pause(); player.seekTo(clip.sourceInMs)
                     }) { picker.launch(arrayOf("video/*")) }
-                    TrackRow("Audio", project.tracks.firstOrNull { it.type == TrackType.AUDIO }?.clips.orEmpty(), "") {
+                    TrackRow("Audio", project.tracks.firstOrNull { it.type == TrackType.AUDIO }?.clips.orEmpty(), "", {}) {
                         dialog = "Audio track is in the project model. Audio import and mixing are the next phase."
                     }
-                    TrackRow("Text", project.tracks.firstOrNull { it.type == TrackType.TEXT }?.clips.orEmpty(), "") {
+                    TrackRow("Text", project.tracks.firstOrNull { it.type == TrackType.TEXT }?.clips.orEmpty(), "", {}) {
                         dialog = "Text overlays are the next phase."
                     }
-                    TrackRow("Overlay", project.tracks.firstOrNull { it.type == TrackType.OVERLAY }?.clips.orEmpty(), "") {
+                    TrackRow("Overlay", project.tracks.firstOrNull { it.type == TrackType.OVERLAY }?.clips.orEmpty(), "", {}) {
                         dialog = "Overlay editing is planned."
                     }
                     Text(status, color = Muted, fontSize = 9.sp, modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp))
@@ -290,7 +290,7 @@ private fun TrackRow(label: String, clips: List<EditorClip>, selectedId: String,
                     contentAlignment = Alignment.Center) { Text("+ Add $label", color = Muted, fontSize = 9.sp) }
             } else clips.forEach { clip ->
                 val active = clip.id == selectedId
-                Box(Modifier.width((clip.durationMs / 250L).coerceIn(76L, 190L).dp).fillMaxHeight()
+                Box(Modifier.width((clip.durationMs / 250L).coerceIn(76L, 190L).toFloat().dp).fillMaxHeight()
                     .clip(RoundedCornerShape(5.dp)).background(if (active) Color(0xFF254A49) else Color(0xFF30343D))
                     .border(if (active) 2.dp else 1.dp, if (active) Accent else Color(0xFF444A55), RoundedCornerShape(5.dp))
                     .clickable { onSelect(clip) }.padding(horizontal = 6.dp), contentAlignment = Alignment.CenterStart) {
