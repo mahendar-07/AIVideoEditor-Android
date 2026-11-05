@@ -15,6 +15,8 @@ A standalone native Android video editor, separate from iCut. The product direct
 - Per-clip source trim ranges applied to preview playback
 - Timeline-wide seeking across the combined video sequence
 - Move-left / move-right clip ordering with contiguous timeline repositioning
+- Undo / redo history for project edits (up to 50 recent states)
+- Move-left / move-right clip ordering with contiguous timeline repositioning
 - Basic timeline rows and clip selection
 
 ## Architecture
@@ -30,14 +32,14 @@ A standalone native Android video editor, separate from iCut. The product direct
 
 - The primary video track plays as a sequential playlist. The current editor does not yet support overlapping video layers, transitions, or gaps between clips.
 - Audio, text, caption and overlay tracks are currently structural placeholders.
-- Undo/redo, transitions, effects, filters, keyframes and waveform editing are not implemented yet.
+- Transitions, effects, filters, keyframes and waveform editing are not implemented yet.
 - Export is not implemented yet. The Export control currently explains this limitation; it does not produce an MP4.
 - Project data is saved locally on the device. Imported media remains in its original location and must remain accessible to restore the project.
 
 ## Next milestones
 
 1. Add drag-and-drop clip rearrangement, timeline zoom and frame-accurate controls.
-2. Add undo/redo and robust project recovery.
+2. Add robust project recovery and autosave integrity checks.
 3. Implement audio tracks, mixing, text overlays and captions.
 4. Implement MP4 rendering/export with progress and cancellation.
 5. Add effects, transitions and AI-assisted editing.
