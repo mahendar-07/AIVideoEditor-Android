@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -51,6 +52,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(UnstableApi::class)
 @Composable
 private fun EditorScreen() {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -89,6 +91,8 @@ private fun EditorScreen() {
     val videoClips = videoTrack?.clips.orEmpty()
     val selected = videoClips.firstOrNull { it.id == selectedId }
     val player = remember { ExoPlayer.Builder(context).build() }
+    val exportEngine = remember(context) { ExportEngine(context) }
+    var exporting by remember { mutableStateOf(false) }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -180,7 +184,7 @@ private fun EditorScreen() {
     LaunchedEffect(project) {
         withContext(Dispatchers.IO) { runCatching { store.save(project) } }
     }
-    DisposableEffect(player) { onDispose { player.release() } }
+    DisposableEffect(player, exportEngine) { onDispose { player.release(); exportEngine.cancel() } }
     LaunchedEffect(player) {
         while (true) {
             val ordered = videoClips.sortedBy { it.timelineStartMs }
@@ -246,10 +250,40 @@ private fun EditorScreen() {
                     Text(project.name, color = Color.White, fontWeight = FontWeight.SemiBold)
                     Text("AUTO-SAVED PROJECT", color = Muted, fontSize = 9.sp)
                 }
-                Button(onClick = { dialog = "Project metadata is saved. Video rendering and MP4 export are the next milestone." },
+                Button(
+                    onClick = {
+                        if (exporting) return@Button
+                        exporting = true
+                        status = "Preparing MP4 export…"
+                        runCatching {
+                            exportEngine.export(
+                                project = project,
+                                onCompleted = { file ->
+                                    exporting = false
+                                    status = "Export complete · ${file.name}"
+                                    dialog = "MP4 saved in the app Movies folder: ${file.absolutePath}"
+                                },
+                                onError = { message ->
+                                    exporting = false
+                                    status = "Export failed"
+                                    dialog = message
+                                }
+                            )
+                        }.onFailure { error ->
+                            exporting = false
+                            status = "Export could not start"
+                            dialog = error.message ?: "Unable to export this project."
+                        }
+                    },
+                    enabled = !exporting,
                     colors = ButtonDefaults.buttonColors(containerColor = Accent),
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 7.dp)) {
-                    Text("Export", color = Color(0xFF07110F), fontWeight = FontWeight.Bold)
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 7.dp)
+                ) {
+                    if (exporting) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.Black)
+                    } else {
+                        Text("Export", color = Color(0xFF07110F), fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }, bottomBar = { ToolBar(tool) { tool = it } }) { padding ->
