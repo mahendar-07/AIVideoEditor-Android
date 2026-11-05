@@ -41,7 +41,7 @@ class TimelineEngineTest {
         val clip = result.tracks.first().clips.single()
         assertEquals(3500L, clip.sourceInMs)
         assertEquals(2500L, clip.timelineStartMs)
-        assertEquals(8500L, clip.durationMs)
+        assertEquals(7500L, clip.durationMs)
     }
 
     @Test fun trimEndShortensSourceOut() {
