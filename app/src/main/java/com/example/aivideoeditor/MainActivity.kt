@@ -91,14 +91,7 @@ private fun EditorScreen() {
     }
 
     LaunchedEffect(source) {
-        player.stop()
-        player.clearMediaItems()
-        duration = 0L
-        position = 0L
         val uri = source ?: return@LaunchedEffect
-        player.setMediaItem(MediaItem.fromUri(uri))
-        player.prepare()
-        player.playWhenReady = false
         val length = withContext(Dispatchers.IO) {
             runCatching {
                 val retriever = MediaMetadataRetriever()
@@ -128,14 +121,60 @@ private fun EditorScreen() {
         } else status = "Could not read this video's duration"
     }
 
+    LaunchedEffect(videoClips) {
+        val ordered = videoClips.sortedBy { it.timelineStartMs }
+        duration = ordered.sumOf { it.durationMs }
+        if (ordered.isEmpty()) {
+            player.stop()
+            player.clearMediaItems()
+            position = 0L
+        } else {
+            val items = ordered.map { clip ->
+                MediaItem.Builder()
+                    .setUri(Uri.parse(clip.sourceUri))
+                    .setClippingConfiguration(
+                        MediaItem.ClippingConfiguration.Builder()
+                            .setStartPositionMs(clip.sourceInMs)
+                            .setEndPositionMs(clip.sourceOutMs)
+                            .build()
+                    )
+                    .build()
+            }
+            val index = ordered.indexOfFirst { it.id == selectedId }.coerceAtLeast(0)
+            player.setMediaItems(items, index, 0L)
+            player.prepare()
+            player.playWhenReady = false
+            position = ordered.take(index).sumOf { it.durationMs }
+        }
+    }
+
+    fun seekTimeline(targetMs: Long) {
+        val ordered = videoClips.sortedBy { it.timelineStartMs }
+        if (ordered.isEmpty()) return
+        var remaining = targetMs.coerceIn(0L, ordered.sumOf { it.durationMs })
+        var index = ordered.lastIndex
+        for (i in ordered.indices) {
+            if (remaining < ordered[i].durationMs || i == ordered.lastIndex) {
+                index = i
+                break
+            }
+            remaining -= ordered[i].durationMs
+        }
+        selectedId = ordered[index].id
+        player.seekTo(index, remaining.coerceIn(0L, ordered[index].durationMs))
+    }
+
     LaunchedEffect(project) {
         withContext(Dispatchers.IO) { runCatching { store.save(project) } }
     }
     DisposableEffect(player) { onDispose { player.release() } }
     LaunchedEffect(player) {
         while (true) {
-            if (player.duration > 0 && player.duration != C.TIME_UNSET && duration == 0L) duration = player.duration
-            position = player.currentPosition.coerceAtLeast(0L)
+            val ordered = videoClips.sortedBy { it.timelineStartMs }
+            val index = player.currentMediaItemIndex
+            position = if (index in ordered.indices) {
+                ordered.take(index).sumOf { it.durationMs } + player.currentPosition.coerceAtLeast(0L)
+            } else 0L
             playing = player.isPlaying
             delay(120)
         }
@@ -147,19 +186,19 @@ private fun EditorScreen() {
     fun split() {
         val clip = selected ?: run { status = "Select a video clip first"; return }
         val before = project
-        val timelineCut = clip.timelineStartMs + (player.currentPosition - clip.sourceInMs)
+        val timelineCut = clip.timelineStartMs + player.currentPosition.coerceIn(0L, clip.durationMs)
         val after = TimelineEngine.split(before, clip.id, timelineCut)
         applyEdit(after, "Split at ${timeLabel(player.currentPosition)}", "Move playhead inside the selected clip to split")
         after.tracks.flatMap { it.clips }.firstOrNull { it.id.startsWith(clip.id + "_split_") }?.let { selectedId = it.id }
     }
     fun trimStart() {
         val clip = selected ?: run { status = "Select a clip first"; return }
-        val timelinePosition = clip.timelineStartMs + (player.currentPosition - clip.sourceInMs)
+        val timelinePosition = clip.timelineStartMs + player.currentPosition.coerceIn(0L, clip.durationMs)
         applyEdit(TimelineEngine.trimStart(project, clip.id, timelinePosition), "Clip start trimmed", "Place playhead inside the selected clip")
     }
     fun trimEnd() {
         val clip = selected ?: run { status = "Select a clip first"; return }
-        val timelinePosition = clip.timelineStartMs + (player.currentPosition - clip.sourceInMs)
+        val timelinePosition = clip.timelineStartMs + player.currentPosition.coerceIn(0L, clip.durationMs)
         applyEdit(TimelineEngine.trimEnd(project, clip.id, timelinePosition), "Clip end trimmed", "Place playhead inside the selected clip")
     }
     fun deleteClip() {
@@ -168,7 +207,7 @@ private fun EditorScreen() {
         val remaining = project.tracks.firstOrNull { it.type == TrackType.VIDEO }?.clips.orEmpty()
         selectedId = remaining.firstOrNull()?.id.orEmpty()
         if (remaining.isEmpty()) { source = null; player.stop(); duration = 0L }
-        else { source = Uri.parse(remaining.first().sourceUri); player.seekTo(remaining.first().sourceInMs) }
+        else { source = Uri.parse(remaining.first().sourceUri) }
         status = "Clip deleted"
     }
 
@@ -221,9 +260,9 @@ private fun EditorScreen() {
                         Text("/ ${timeLabel(duration)}", color = Muted, fontSize = 9.sp)
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = { player.seekTo(0); player.pause() }) { Icon(Icons.Default.SkipPrevious, "Restart", tint = Color.White) }
+                        IconButton(onClick = { seekTimeline(0L); player.pause() }) { Icon(Icons.Default.SkipPrevious, "Restart", tint = Color.White) }
                         FilledIconButton(onClick = {
-                            if (player.isPlaying) player.pause() else if (source != null) player.play() else picker.launch(arrayOf("video/*"))
+                            if (player.isPlaying) player.pause() else if (videoClips.isNotEmpty()) player.play() else picker.launch(arrayOf("video/*"))
                         }, modifier = Modifier.size(38.dp), colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.White)) {
                             Icon(if (playing) Icons.Default.Pause else Icons.Default.PlayArrow, "Play", tint = Color.Black)
                         }
@@ -232,7 +271,7 @@ private fun EditorScreen() {
                     Text("Original", color = Muted, fontSize = 10.sp)
                 }
                 if (duration > 0L) {
-                    Slider(value = position.coerceIn(0L, duration).toFloat(), onValueChange = { player.seekTo(it.toLong()) },
+                    Slider(value = position.coerceIn(0L, duration).toFloat(), onValueChange = { seekTimeline(it.toLong()) },
                         valueRange = 0f..duration.toFloat(), modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp).height(24.dp),
                         colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent))
                 }
@@ -241,10 +280,12 @@ private fun EditorScreen() {
                         Text("Timeline", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         Text("${project.tracks.sumOf { it.clips.size }} clips", color = Muted, fontSize = 10.sp)
                     }
-                    TrackRow("Video", videoClips, selectedId, { clip ->
+                    TrackRow("Video", videoClips.sortedBy { it.timelineStartMs }, selectedId, { clip ->
                         selectedId = clip.id
                         if (source?.toString() != clip.sourceUri) source = Uri.parse(clip.sourceUri)
-                        player.pause(); player.seekTo(clip.sourceInMs)
+                        val index = videoClips.sortedBy { it.timelineStartMs }.indexOfFirst { it.id == clip.id }
+                        player.pause()
+                        if (index >= 0) player.seekTo(index, 0L)
                     }) { picker.launch(arrayOf("video/*")) }
                     TrackRow("Audio", project.tracks.firstOrNull { it.type == TrackType.AUDIO }?.clips.orEmpty(), "", {}) {
                         dialog = "Audio track is in the project model. Audio import and mixing are the next phase."
@@ -264,7 +305,7 @@ private fun EditorScreen() {
                         "Trim start" -> trimStart()
                         "Trim end" -> trimEnd()
                         "Delete" -> deleteClip()
-                        "Go to clip start" -> selected?.let { player.seekTo(it.sourceInMs) }
+                        "Go to clip start" -> selected?.let { seekTimeline(videoClips.sortedBy { c -> c.timelineStartMs }.takeWhile { c -> c.id != it.id }.sumOf { c -> c.durationMs }) }
                         else -> dialog = "$action is planned for the next feature phase."
                     }
                 }
