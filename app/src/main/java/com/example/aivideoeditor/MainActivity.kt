@@ -147,17 +147,20 @@ private fun EditorScreen() {
     fun split() {
         val clip = selected ?: run { status = "Select a video clip first"; return }
         val before = project
-        val after = TimelineEngine.split(before, clip.id, player.currentPosition)
+        val timelineCut = clip.timelineStartMs + (player.currentPosition - clip.sourceInMs)
+        val after = TimelineEngine.split(before, clip.id, timelineCut)
         applyEdit(after, "Split at ${timeLabel(player.currentPosition)}", "Move playhead inside the selected clip to split")
         after.tracks.flatMap { it.clips }.firstOrNull { it.id.startsWith(clip.id + "_split_") }?.let { selectedId = it.id }
     }
     fun trimStart() {
         val clip = selected ?: run { status = "Select a clip first"; return }
-        applyEdit(TimelineEngine.trimStart(project, clip.id, player.currentPosition), "Clip start trimmed", "Place playhead inside the selected clip")
+        val timelinePosition = clip.timelineStartMs + (player.currentPosition - clip.sourceInMs)
+        applyEdit(TimelineEngine.trimStart(project, clip.id, timelinePosition), "Clip start trimmed", "Place playhead inside the selected clip")
     }
     fun trimEnd() {
         val clip = selected ?: run { status = "Select a clip first"; return }
-        applyEdit(TimelineEngine.trimEnd(project, clip.id, player.currentPosition), "Clip end trimmed", "Place playhead inside the selected clip")
+        val timelinePosition = clip.timelineStartMs + (player.currentPosition - clip.sourceInMs)
+        applyEdit(TimelineEngine.trimEnd(project, clip.id, timelinePosition), "Clip end trimmed", "Place playhead inside the selected clip")
     }
     fun deleteClip() {
         val clip = selected ?: run { status = "Select a clip first"; return }
