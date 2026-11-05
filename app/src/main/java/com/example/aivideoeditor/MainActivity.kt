@@ -205,10 +205,21 @@ private fun EditorScreen() {
         val clip = selected ?: run { status = "Select a clip first"; return }
         project = TimelineEngine.delete(project, clip.id)
         val remaining = project.tracks.firstOrNull { it.type == TrackType.VIDEO }?.clips.orEmpty()
-        selectedId = remaining.firstOrNull()?.id.orEmpty()
+        selectedId = remaining.sortedBy { it.timelineStartMs }.firstOrNull()?.id.orEmpty()
         if (remaining.isEmpty()) { source = null; player.stop(); duration = 0L }
         else { source = Uri.parse(remaining.first().sourceUri) }
         status = "Clip deleted"
+    }
+    fun reorderSelected(direction: Int) {
+        val ordered = videoClips.sortedBy { it.timelineStartMs }
+        val index = ordered.indexOfFirst { it.id == selectedId }
+        val target = index + direction
+        if (index < 0 || target !in ordered.indices) {
+            status = if (direction < 0) "Clip is already first" else "Clip is already last"
+            return
+        }
+        project = TimelineEngine.reorder(project, selectedId, target)
+        status = "Clip order updated"
     }
 
     MaterialTheme(colorScheme = darkColorScheme(primary = Accent, background = Bg, surface = Panel)) {
@@ -305,6 +316,8 @@ private fun EditorScreen() {
                         "Trim start" -> trimStart()
                         "Trim end" -> trimEnd()
                         "Delete" -> deleteClip()
+                        "Move left" -> reorderSelected(-1)
+                        "Move right" -> reorderSelected(1)
                         "Go to clip start" -> selected?.let { seekTimeline(videoClips.sortedBy { c -> c.timelineStartMs }.takeWhile { c -> c.id != it.id }.sumOf { c -> c.durationMs }) }
                         else -> dialog = "$action is planned for the next feature phase."
                     }
