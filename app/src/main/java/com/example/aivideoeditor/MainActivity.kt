@@ -42,7 +42,6 @@ private val Panel = Color(0xFF17191F)
 private val Accent = Color(0xFF42D6C5)
 private val Muted = Color(0xFF9297A3)
 
-private data class Segment(val id: Int, val start: Long, val end: Long)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -59,9 +58,20 @@ private fun EditorScreen() {
     var position by remember { mutableLongStateOf(0L) }
     var playing by remember { mutableStateOf(false) }
     var tool by remember { mutableStateOf("Edit") }
-    var segments by remember { mutableStateOf(listOf<Segment>()) }
-    var selectedId by remember { mutableIntStateOf(1) }
-    var nextId by remember { mutableIntStateOf(2) }
+    var project by remember { mutableStateOf(
+        EditorProject(
+            id = "active-project",
+            name = "New project",
+            tracks = listOf(
+                EditorTrack("video-main", "Video", TrackType.VIDEO),
+                EditorTrack("audio-main", "Audio", TrackType.AUDIO),
+                EditorTrack("text-main", "Text", TrackType.TEXT),
+                EditorTrack("overlay-main", "Overlay", TrackType.OVERLAY)
+            )
+        )
+    ) }
+    var selectedClipId by remember { mutableStateOf<String?>(null) }
+    val projectStore = remember { ProjectStore(context) }
     var status by remember { mutableStateOf("Import a video to begin") }
     var dialog by remember { mutableStateOf("") }
 
@@ -71,13 +81,32 @@ private fun EditorScreen() {
             source = uri
             duration = 0L
             position = 0L
-            segments = emptyList()
-            selectedId = 1
-            nextId = 2
+            project = project.copy(tracks = project.tracks.map { it.copy(clips = emptyList()) })
+            selectedClipId = null
             status = "Loading video…"
         }
     }
     val player = remember { ExoPlayer.Builder(context).build() }
+
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            runCatching { projectStore.load("active-project") }
+        }.getOrNull()?.let { restored ->
+            project = restored
+            val restoredVideo = restored.tracks.firstOrNull { it.type == TrackType.VIDEO }?.clips?.firstOrNull()
+            if (restoredVideo != null) {
+                source = Uri.parse(restoredVideo.sourceUri)
+                selectedClipId = restoredVideo.id
+                status = "Project restored"
+            }
+        }
+    }
+
+    LaunchedEffect(project) {
+        withContext(Dispatchers.IO) {
+            runCatching { projectStore.save(project) }
+        }
+    }
 
     LaunchedEffect(source) {
         player.stop()
@@ -104,9 +133,21 @@ private fun EditorScreen() {
             }
             if (metadataDuration > 0L) {
                 duration = metadataDuration
-                if (segments.isEmpty()) {
-                    segments = listOf(Segment(1, 0L, metadataDuration))
-                    selectedId = 1
+                val videoTrack = project.tracks.first { it.type == TrackType.VIDEO }
+                if (videoTrack.clips.isEmpty()) {
+                    val clip = EditorClip(
+                        id = "clip-${System.currentTimeMillis()}",
+                        sourceUri = uri.toString(),
+                        sourceInMs = 0L,
+                        sourceOutMs = metadataDuration,
+                        timelineStartMs = 0L,
+                        trackId = videoTrack.id,
+                        type = TrackType.VIDEO
+                    )
+                    project = project.copy(tracks = project.tracks.map {
+                        if (it.id == videoTrack.id) it.copy(clips = listOf(clip)) else it
+                    })
+                    selectedClipId = clip.id
                     status = "Video loaded · " + timeLabel(metadataDuration)
                 }
             } else {
@@ -121,8 +162,21 @@ private fun EditorScreen() {
             val length = player.duration
             if (length > 0 && length != C.TIME_UNSET && length != duration) {
                 duration = length
-                if (segments.isEmpty()) {
-                    segments = listOf(Segment(1, 0L, length))
+                val videoTrack = project.tracks.first { it.type == TrackType.VIDEO }
+                if (videoTrack.clips.isEmpty() && source != null) {
+                    val clip = EditorClip(
+                        id = "clip-${System.currentTimeMillis()}",
+                        sourceUri = source.toString(),
+                        sourceInMs = 0L,
+                        sourceOutMs = length,
+                        timelineStartMs = 0L,
+                        trackId = videoTrack.id,
+                        type = TrackType.VIDEO
+                    )
+                    project = project.copy(tracks = project.tracks.map {
+                        if (it.id == videoTrack.id) it.copy(clips = listOf(clip)) else it
+                    })
+                    selectedClipId = clip.id
                     status = "Video loaded · " + timeLabel(length)
                 }
             }
@@ -132,56 +186,55 @@ private fun EditorScreen() {
         }
     }
 
-    val selected = segments.firstOrNull { it.id == selectedId }
+    val allClips = project.tracks.flatMap { it.clips }
+    val selected = allClips.firstOrNull { it.id == selectedClipId }
 
     fun splitClip() {
-        val clip = segments.firstOrNull { it.id == selectedId }
-        val cut = player.currentPosition
+        val clip = selected
         if (clip == null) status = "Import a video first"
-        else if (cut <= clip.start + 100L || cut >= clip.end - 100L) {
-            status = "Move playhead inside the selected clip to split"
-        } else {
-            val left = clip.copy(end = cut)
-            val right = Segment(nextId, cut, clip.end)
-            segments = segments.flatMap { if (it.id == clip.id) listOf(left, right) else listOf(it) }
-            selectedId = nextId
-            nextId++
-            status = "Split at " + timeLabel(cut)
+        else {
+            val updated = TimelineEngine.split(project, clip.id, player.currentPosition)
+            if (updated == project) status = "Move playhead inside the selected clip to split"
+            else {
+                project = updated
+                selectedClipId = updated.tracks.flatMap { it.clips }.firstOrNull {
+                    it.id.startsWith("${clip.id}_split_")
+                }?.id
+                status = "Clip split at " + timeLabel(player.currentPosition)
+            }
         }
     }
 
     fun trimStart() {
-        val clip = segments.firstOrNull { it.id == selectedId }
-        val at = player.currentPosition
-        if (clip != null && at > clip.start && at < clip.end - 100L) {
-            segments = segments.map { if (it.id == clip.id) it.copy(start = at) else it }
-            status = "Start trimmed to " + timeLabel(at)
-        } else status = "Place playhead inside the selected clip"
+        val clip = selected
+        if (clip == null) status = "Select a clip first"
+        else {
+            val updated = TimelineEngine.trimStart(project, clip.id, player.currentPosition)
+            if (updated == project) status = "Place playhead inside the selected clip"
+            else { project = updated; status = "Clip start trimmed" }
+        }
     }
 
     fun trimEnd() {
-        val clip = segments.firstOrNull { it.id == selectedId }
-        val at = player.currentPosition
-        if (clip != null && at > clip.start + 100L && at < clip.end) {
-            segments = segments.map { if (it.id == clip.id) it.copy(end = at) else it }
-            status = "End trimmed to " + timeLabel(at)
-        } else status = "Place playhead inside the selected clip"
+        val clip = selected
+        if (clip == null) status = "Select a clip first"
+        else {
+            val updated = TimelineEngine.trimEnd(project, clip.id, player.currentPosition)
+            if (updated == project) status = "Place playhead inside the selected clip"
+            else { project = updated; status = "Clip end trimmed" }
+        }
     }
 
     fun deleteClip() {
-        if (segments.isEmpty()) return
-        if (segments.size == 1) {
-            segments = emptyList()
+        val clip = selected ?: return
+        project = TimelineEngine.delete(project, clip.id)
+        selectedClipId = project.tracks.firstOrNull { it.type == TrackType.VIDEO }?.clips?.firstOrNull()?.id
+        if (project.tracks.firstOrNull { it.type == TrackType.VIDEO }?.clips.isNullOrEmpty()) {
             source = null
             duration = 0L
             player.stop()
-        } else {
-            val rest = segments.filterNot { it.id == selectedId }
-            segments = rest
-            selectedId = rest.first().id
-            player.seekTo(rest.first().start)
         }
-        status = "Selected clip segment deleted"
+        status = "Clip removed from project"
     }
 
     MaterialTheme(colorScheme = darkColorScheme(primary = Accent, background = Bg, surface = Panel)) {
@@ -271,26 +324,38 @@ private fun EditorScreen() {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp),
                         horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text("Timeline", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        Text("${segments.size} segment(s)", color = Muted, fontSize = 10.sp)
+                        Text("${allClips.size} clip(s) · saved project", color = Muted, fontSize = 10.sp)
                     }
-                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                        if (segments.isEmpty()) {
-                            Box(Modifier.width(250.dp).height(55.dp).clip(RoundedCornerShape(6.dp))
-                                .background(Panel).border(1.dp, Color.DarkGray, RoundedCornerShape(6.dp))
-                                .clickable { picker.launch(arrayOf("video/*")) }, contentAlignment = Alignment.Center) {
-                                Text("+ Import a video clip", color = Muted, fontSize = 11.sp)
-                            }
-                        } else segments.forEachIndexed { index, clip ->
-                            val active = clip.id == selectedId
-                            Column(Modifier.width(116.dp).height(55.dp).clip(RoundedCornerShape(6.dp))
-                                .background(if (active) Color(0xFF254A49) else Panel)
-                                .border(if (active) 2.dp else 1.dp, if (active) Accent else Color.DarkGray, RoundedCornerShape(6.dp))
-                                .clickable { selectedId = clip.id; player.pause(); player.seekTo(clip.start) }
-                                .padding(7.dp), verticalArrangement = Arrangement.SpaceBetween) {
-                                Text("CLIP ${index + 1}", color = if (active) Accent else Color.LightGray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                Text("${timeLabel(clip.start)} – ${timeLabel(clip.end)}", color = Color.White, fontSize = 9.sp)
-                                Text(timeLabel(clip.end - clip.start), color = Muted, fontSize = 8.sp)
+                    Column(Modifier.fillMaxWidth().heightIn(max = 94.dp).verticalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        project.tracks.forEach { track ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(track.name, color = Muted, fontSize = 9.sp, modifier = Modifier.width(54.dp))
+                                Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                    if (track.clips.isEmpty()) {
+                                        Box(Modifier.width(110.dp).height(34.dp).clip(RoundedCornerShape(5.dp))
+                                            .background(Panel).border(1.dp, Color.DarkGray, RoundedCornerShape(5.dp)),
+                                            contentAlignment = Alignment.Center) {
+                                            Text("＋", color = Muted, fontSize = 12.sp)
+                                        }
+                                    } else track.clips.forEach { clip ->
+                                        val active = clip.id == selectedClipId
+                                        Column(Modifier.width((clip.durationMs / 100L).toInt().coerceIn(72, 190).dp)
+                                            .height(38.dp).clip(RoundedCornerShape(5.dp))
+                                            .background(if (active) Color(0xFF254A49) else Panel)
+                                            .border(if (active) 2.dp else 1.dp, if (active) Accent else Color.DarkGray, RoundedCornerShape(5.dp))
+                                            .clickable {
+                                                selectedClipId = clip.id
+                                                player.pause()
+                                                player.seekTo(clip.sourceInMs)
+                                            }.padding(5.dp), verticalArrangement = Arrangement.Center) {
+                                            Text(clip.title.ifBlank { track.type.name + " CLIP" }, color = if (active) Accent else Color.LightGray,
+                                                fontSize = 8.sp, maxLines = 1)
+                                            Text(timeLabel(clip.durationMs), color = Color.White, fontSize = 8.sp)
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
