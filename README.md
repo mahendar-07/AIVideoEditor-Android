@@ -11,6 +11,10 @@ A standalone native Android video editor, separate from iCut. The product direct
 - Non-destructive clip metadata: source in/out points and timeline position
 - Timeline operations: split, trim start, trim end, move and delete
 - Automatic project JSON save/restore in app-private storage
+- Multi-source video playlist preview with sequential playback across clips
+- Per-clip source trim ranges applied to preview playback
+- Timeline-wide seeking across the combined video sequence
+- Move-left / move-right clip ordering with contiguous timeline repositioning
 - Basic timeline rows and clip selection
 
 ## Architecture
@@ -24,7 +28,7 @@ A standalone native Android video editor, separate from iCut. The product direct
 
 ## Current limitations
 
-- Multiple clips can be stored in the project timeline, but continuous playback across clips is not implemented yet; preview currently plays one selected source at a time.
+- The primary video track plays as a sequential playlist. The current editor does not yet support overlapping video layers, transitions, or gaps between clips.
 - Audio, text, caption and overlay tracks are currently structural placeholders.
 - Undo/redo, transitions, effects, filters, keyframes and waveform editing are not implemented yet.
 - Export is not implemented yet. The Export control currently explains this limitation; it does not produce an MP4.
@@ -32,12 +36,11 @@ A standalone native Android video editor, separate from iCut. The product direct
 
 ## Next milestones
 
-1. Stabilize the current project integration and CI build.
-2. Add reliable multi-clip import, ordering and continuous timeline playback.
-3. Add undo/redo and robust project recovery.
-4. Implement audio, text overlays and captions.
-5. Implement MP4 rendering/export with progress and cancellation.
-6. Add effects, transitions and AI-assisted editing.
+1. Add drag-and-drop clip rearrangement, timeline zoom and frame-accurate controls.
+2. Add undo/redo and robust project recovery.
+3. Implement audio tracks, mixing, text overlays and captions.
+4. Implement MP4 rendering/export with progress and cancellation.
+5. Add effects, transitions and AI-assisted editing.
 
 ## Build
 
