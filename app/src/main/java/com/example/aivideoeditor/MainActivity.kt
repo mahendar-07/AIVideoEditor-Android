@@ -73,15 +73,6 @@ private fun EditorScreen() {
             project = updated
         }
     }
-    fun restoreHistory(target: EditorProject, opposite: List<EditorProject>) {
-        project = target
-        if (opposite === undoStack) undoStack = undoStack.dropLast(1)
-        else redoStack = redoStack.dropLast(1)
-        val firstClip = target.tracks.firstOrNull { it.type == TrackType.VIDEO }?.clips?.minByOrNull { it.timelineStartMs }
-        selectedId = firstClip?.id.orEmpty()
-        source = firstClip?.sourceUri?.let { Uri.parse(it) }
-        status = if (opposite === undoStack) "Undo applied" else "Redo applied"
-    }
     val restoredClip = project.tracks.firstOrNull { it.type == TrackType.VIDEO }?.clips?.firstOrNull()
     var source by remember { mutableStateOf(restoredClip?.sourceUri?.let { Uri.parse(it) }) }
     var duration by remember { mutableLongStateOf(project.durationMs) }
