@@ -35,6 +35,7 @@ import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import java.util.Locale
 
 private val Bg = Color(0xFF08090D)
@@ -101,15 +102,11 @@ private fun EditorScreen() {
 
     LaunchedEffect(source) {
         val uri = source ?: return@LaunchedEffect
-        val length = withContext(Dispatchers.IO) {
-            runCatching {
-                val retriever = MediaMetadataRetriever()
-                try {
-                    retriever.setDataSource(context, uri)
-                    retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-                } finally { retriever.release() }
-            }.getOrDefault(0L)
+        status = "Reading video…"
+        val result = withContext(Dispatchers.IO) {
+            runCatching { withTimeout(20_000L) { readVideoDurationMs(context, uri) } }
         }
+        val length = result.getOrNull() ?: 0L
         if (length > 0L) {
             duration = length
             val alreadyAdded = project.tracks.flatMap { it.clips }.any { it.sourceUri == uri.toString() }
@@ -126,8 +123,15 @@ private fun EditorScreen() {
                 selectedId = id
                 serial++
             }
-            status = "Video ready · ${timeLabel(length)}"
-        } else status = "Could not read this video's duration"
+            status = "Video imported · ${timeLabel(length)}"
+        } else {
+            source = null
+            status = when (result.exceptionOrNull()) {
+                is kotlinx.coroutines.TimeoutCancellationException -> "Video import timed out. Try a locally stored MP4."
+                null -> "Unsupported or unreadable video. Try another MP4."
+                else -> "Import failed: ${result.exceptionOrNull()?.javaClass?.simpleName}"
+            }
+        }
     }
 
     LaunchedEffect(videoClips) {
@@ -431,6 +435,31 @@ private fun ToolActions(tool: String, onAction: (String) -> Unit) {
                 Text(action, color = Color.LightGray, fontSize = 9.sp, textAlign = TextAlign.Center, maxLines = 1)
             }
         }
+    }
+}
+
+private fun readVideoDurationMs(context: android.content.Context, uri: Uri): Long {
+    val retriever = MediaMetadataRetriever()
+    try {
+        val descriptor = context.contentResolver.openAssetFileDescriptor(uri, "r")
+            ?: throw IllegalStateException("Cannot open selected video")
+        descriptor.use { asset ->
+            if (asset.length >= 0L) retriever.setDataSource(asset.fileDescriptor, asset.startOffset, asset.length)
+            else retriever.setDataSource(asset.fileDescriptor)
+            val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+            if (duration > 0L) return duration
+        }
+    } catch (_: Exception) {
+        // Fall back for document providers that do not expose a seekable descriptor.
+    } finally {
+        retriever.release()
+    }
+    val fallback = MediaMetadataRetriever()
+    return try {
+        fallback.setDataSource(context, uri)
+        fallback.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+    } finally {
+        fallback.release()
     }
 }
 
