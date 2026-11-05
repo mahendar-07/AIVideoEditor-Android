@@ -2,29 +2,44 @@
 
 A standalone native Android video editor, separate from iCut. Product direction: full manual editing plus AI-assisted editing and AI creation, using offline-first recognition with optional online AI services.
 
-## Current foundation
-- Kotlin + Jetpack Compose Android application
-- CapCut-inspired dark mobile editor interface
-- Import video from device storage
-- Media3 preview playback and play/pause
-- Timeline segment selection
-- Split a selected segment at the playhead
-- Set selected segment start/end at the playhead (trim boundaries)
-- Delete a selected segment
-- Playback position scrubbing
+## Architecture foundation
+- **UI:** Kotlin + Jetpack Compose
+- **Project model:** non-destructive project, tracks and clip metadata
+- **Timeline engine:** pure operations for split, trim-start, trim-end, move and delete
+- **Project storage:** versioned JSON project files in app-private storage
+- **Preview:** AndroidX Media3 / ExoPlayer
+- **Export:** planned Media3 Transformer / Android MediaCodec pipeline
+- **AI:** planned offline speech recognition and optional online generation
 
-## Important editing-engine note
-Split, trim-boundary and delete operations currently update the in-memory edit timeline and selected segment state. They do not yet create a rendered output file or stitch multiple segments into a final video. Project persistence, multi-source clip assembly, audio/text tracks and export are subsequent milestones.
+## Current app capabilities
+- Import a video from device storage
+- Preview playback and play/pause
+- Scrub playback position
+- Basic in-memory timeline segment selection, split, trim boundaries and delete
 
-## Roadmap
-1. Stabilize timeline and clip editing; add multi-clip project model and undo/redo.
-2. Add audio tracks, text overlays, captions and synchronization.
-3. Add render/export pipeline and project save/restore.
-4. Add offline speech recognition (Whisper evaluation), word-timed captions and AI-assisted editing.
-5. Add optional online AI video generation and advanced effects.
+## New project-engine foundation
+The new `EditorProject.kt` defines:
+- Projects with canvas dimensions and frame rate
+- Video, audio, text and overlay track types
+- Clips with source in/out points and timeline positions
+- Validation for project/track/clip consistency
+- Non-destructive timeline operations
+- JSON save/load using app-private storage
 
-## Build locally
-Open this repository in Android Studio, install JDK 17 and Android SDK 36, sync Gradle, and run the app configuration.
+Unit tests cover timeline split, trim, delete, invalid split and project validation.
 
-## APK
-Open GitHub Actions, select the latest successful Android APK workflow run, and download the AIVideoEditor-debug-apk artifact.
+## Important current limitation
+The existing editor screen has not yet been migrated to use `EditorProject` and `ProjectStore`. Its visible timeline still uses a temporary in-memory segment state. The new project engine is the architectural foundation; integration into the screen, multi-source clip playback, persistent project UI and actual export are subsequent tasks. Timeline metadata operations do not yet render a new output video.
+
+## Next milestones
+1. Connect the editor screen to EditorProject and ProjectStore.
+2. Build multi-track timeline UI and multi-source playback.
+3. Add undo/redo and project save/restore controls.
+4. Add audio tracks, text overlays and captions.
+5. Implement final rendering/export.
+6. Add offline speech recognition and AI-assisted editing.
+
+## Build
+Open the repository in Android Studio with JDK 17 and Android SDK 36, sync Gradle, and run the app.
+
+GitHub Actions builds a debug APK on pushes to `main`.
