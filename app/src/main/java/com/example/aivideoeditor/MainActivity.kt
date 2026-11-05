@@ -64,6 +64,24 @@ private fun EditorScreen() {
         )
     )
     var project by remember { mutableStateOf(store.load(PROJECT_ID) ?: emptyProject()) }
+    var undoStack by remember { mutableStateOf(emptyList<EditorProject>()) }
+    var redoStack by remember { mutableStateOf(emptyList<EditorProject>()) }
+    fun commitProject(updated: EditorProject) {
+        if (updated != project) {
+            undoStack = (undoStack + project).takeLast(50)
+            redoStack = emptyList()
+            project = updated
+        }
+    }
+    fun restoreHistory(target: EditorProject, opposite: List<EditorProject>) {
+        project = target
+        if (opposite === undoStack) undoStack = undoStack.dropLast(1)
+        else redoStack = redoStack.dropLast(1)
+        val firstClip = target.tracks.firstOrNull { it.type == TrackType.VIDEO }?.clips?.minByOrNull { it.timelineStartMs }
+        selectedId = firstClip?.id.orEmpty()
+        source = firstClip?.sourceUri?.let { Uri.parse(it) }
+        status = if (opposite === undoStack) "Undo applied" else "Redo applied"
+    }
     val restoredClip = project.tracks.firstOrNull { it.type == TrackType.VIDEO }?.clips?.firstOrNull()
     var source by remember { mutableStateOf(restoredClip?.sourceUri?.let { Uri.parse(it) }) }
     var duration by remember { mutableLongStateOf(project.durationMs) }
@@ -113,7 +131,7 @@ private fun EditorScreen() {
                         trackId = track.id, type = TrackType.VIDEO, title = "Video $serial"
                     )) else track
                 }
-                project = project.copy(tracks = updated)
+                commitProject(project.copy(tracks = updated))
                 selectedId = id
                 serial++
             }
@@ -181,7 +199,7 @@ private fun EditorScreen() {
     }
 
     fun applyEdit(updated: EditorProject, success: String, failure: String) {
-        if (updated == project) status = failure else { project = updated; status = success }
+        if (updated == project) status = failure else { commitProject(updated); status = success }
     }
     fun split() {
         val clip = selected ?: run { status = "Select a video clip first"; return }
@@ -203,7 +221,7 @@ private fun EditorScreen() {
     }
     fun deleteClip() {
         val clip = selected ?: run { status = "Select a clip first"; return }
-        project = TimelineEngine.delete(project, clip.id)
+        commitProject(TimelineEngine.delete(project, clip.id))
         val remaining = project.tracks.firstOrNull { it.type == TrackType.VIDEO }?.clips.orEmpty()
         selectedId = remaining.sortedBy { it.timelineStartMs }.firstOrNull()?.id.orEmpty()
         if (remaining.isEmpty()) { source = null; player.stop(); duration = 0L }
@@ -218,7 +236,7 @@ private fun EditorScreen() {
             status = if (direction < 0) "Clip is already first" else "Clip is already last"
             return
         }
-        project = TimelineEngine.reorder(project, selectedId, target)
+        commitProject(TimelineEngine.reorder(project, selectedId, target))
         status = "Clip order updated"
     }
 
@@ -277,7 +295,30 @@ private fun EditorScreen() {
                         }, modifier = Modifier.size(38.dp), colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.White)) {
                             Icon(if (playing) Icons.Default.Pause else Icons.Default.PlayArrow, "Play", tint = Color.Black)
                         }
-                        IconButton(onClick = { dialog = "Undo and redo history will be implemented next." }) { Icon(Icons.Default.Undo, "Undo", tint = Color.White) }
+                        IconButton(onClick = {
+                            if (undoStack.isNotEmpty()) {
+                                val previous = undoStack.last()
+                                redoStack = (redoStack + project).takeLast(50)
+                                undoStack = undoStack.dropLast(1)
+                                project = previous
+                                val clip = previous.tracks.firstOrNull { it.type == TrackType.VIDEO }?.clips?.minByOrNull { it.timelineStartMs }
+                                selectedId = clip?.id.orEmpty()
+                                source = clip?.sourceUri?.let { Uri.parse(it) }
+                                status = "Undo applied"
+                            }
+                        }, enabled = undoStack.isNotEmpty()) { Icon(Icons.Default.Undo, "Undo", tint = if (undoStack.isNotEmpty()) Color.White else Muted) }
+                        IconButton(onClick = {
+                            if (redoStack.isNotEmpty()) {
+                                val next = redoStack.last()
+                                undoStack = (undoStack + project).takeLast(50)
+                                redoStack = redoStack.dropLast(1)
+                                project = next
+                                val clip = next.tracks.firstOrNull { it.type == TrackType.VIDEO }?.clips?.minByOrNull { it.timelineStartMs }
+                                selectedId = clip?.id.orEmpty()
+                                source = clip?.sourceUri?.let { Uri.parse(it) }
+                                status = "Redo applied"
+                            }
+                        }, enabled = redoStack.isNotEmpty()) { Icon(Icons.Default.Redo, "Redo", tint = if (redoStack.isNotEmpty()) Color.White else Muted) }
                     }
                     Text("Original", color = Muted, fontSize = 10.sp)
                 }
